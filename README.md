@@ -8,6 +8,8 @@ Check the article: "Factor Investing with Python #1 Data" for details. [Click to
 2. Download bulk data from [SimFin](https://simfin.com/data/bulk). The bulk data needed are:
     - US Companies
     - US Share Prices
-    - Industries
+    - Sector/Industries
     - US Balance Sheet, Income Statement, Cashflow (for each statements we need quarterly, annually and ttm data)
+        - Plese notice we don't need SimFin+ for learning purpose. Only need Details to be Normal and Restatements to be Most Recent.
+        - We only need Standardisation Schema to be General for learning purpose. 
 3. Create folder "data" and save all bulk csv files under the "data" folder
