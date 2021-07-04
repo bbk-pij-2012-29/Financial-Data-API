@@ -10,6 +10,7 @@ Check the article: "Factor Investing with Python #1 Data" for details. [Click to
     - US Share Prices
     - Sector/Industries
     - US Balance Sheet, Income Statement, Cashflow (for each statements we need quarterly, annually and ttm data)
-        - Plese notice we don't need SimFin+ for learning purpose. Only need Details to be Normal and Restatements to be Most Recent.
-        - We only need Standardisation Schema to be General for learning purpose. 
+        - Please notice we don’t need SimFin+ for learning purposes. Only need Details to be Normal and Restatements to be Most Recent.
+        - We also only need Standardisation Schema to be General for learning purposes.
+    - Alternatively, you may download it from my Google Drive [Click to Open](https://drive.google.com/drive/folders/1KsF_Wb-Y6p91FgEMdE9Ur3Njvf37eDAN)
 3. Create folder "data" and save all bulk csv files under the "data" folder
