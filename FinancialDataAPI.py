@@ -1,10 +1,12 @@
 import pandas as pd
+import numpy as np
 import os
 from datetime import date, datetime, timedelta
 
 class FinancialDataAPI:
     __data_dict = None
     __field_meta = None
+    __date_format = '%Y-%m-%d'
     
     def __init__(self, source='./data', sep=';'):
         if FinancialDataAPI.__data_dict is None:
@@ -45,6 +47,41 @@ class FinancialDataAPI:
         FinancialDataAPI.__field_meta = pd.read_csv('./meta/fields-meta.csv').fillna('')
     
     
+    def list_fields(self):
+        """
+            The function shows the full list of fields
+        """
+        
+        df = FinancialDataAPI.__field_meta[['Long Name', 'Short Name', 'func', 'doc']].copy()
+        df['func'] = df['func'].str[4:]
+        df = df.rename(columns={'func': 'Category', 'doc': 'Quick Document'})
+        
+        return df.copy()
+    
+    
+    def list_data_category(self):
+        """
+            The function lists all the data categories available
+        """
+        
+        return [cat.replace('get_', '') for cat in FinancialDataAPI.__field_meta['func'].unique().tolist()]
+        
+    
+    def list_fields_by_category(self, category_list):
+        """
+            The function returns a list of fields for a given category list
+            category_list: list of categories
+        """
+        
+        category_list = [f'get_{cat}' for cat in category_list]
+        df = FinancialDataAPI.__field_meta[FinancialDataAPI.__field_meta['func'].isin(category_list)]
+        df = df[['Long Name', 'Short Name', 'func', 'doc']]
+        df['func'] = df['func'].str[4:]
+        df = df.rename(columns={'func': 'Category', 'doc': 'Quick Document'})
+        
+        return df.copy()
+    
+    
     def list_data_sets(self):
         """
             The function retuns a list of names of the raw data sets.
@@ -81,7 +118,7 @@ class FinancialDataAPI:
         px_df = FinancialDataAPI.__data_dict['shareprices-daily']
         
         # check if price exist
-        tickers_valid = px_df[px_df['Date'] <= as_of_date.strftime('%Y-%m-%d')]['Ticker'].unique().tolist()
+        tickers_valid = px_df[px_df['Date'] <= as_of_date.strftime(FinancialDataAPI.__date_format)]['Ticker'].unique().tolist()
         
         return tickers_valid
     
@@ -105,22 +142,10 @@ class FinancialDataAPI:
         # check if price exist
         tickers_valid = px_df[
             (px_df['Ticker'].isin(tickers)) 
-            & (px_df['Date'] <= as_of_date.strftime('%Y-%m-%d'))
+            & (px_df['Date'] <= as_of_date.strftime(FinancialDataAPI.__date_format))
         ]['Ticker'].unique().tolist()
         
         return tickers_valid
-    
-    
-    def list_fields(self):
-        """
-            The function shows the full list of fields
-        """
-        
-        df = FinancialDataAPI.__field_meta[['Long Name', 'Short Name', 'func']].copy()
-        df['func'] = df['func'].str[4:]
-        df = df.rename(columns={'func': 'Category'})
-        
-        return df
     
     
     def __get_field_info(self, keyword):
@@ -201,7 +226,7 @@ class FinancialDataAPI:
             value = value.lower()
             
         # check if the value is Date for Datetime and if yes, make it yyyy-mm-dd string
-        dt_format = '%Y-%m-%d'
+        dt_format = FinancialDataAPI.__date_format
         
         if isinstance(value, date) or isinstance(value, datetime):
             value = value.strftime(dt_format)
@@ -228,6 +253,30 @@ class FinancialDataAPI:
         
         df = df[df['Ticker'].isin(tickers)][['Ticker', field_long_name]].copy()
         df = df.set_index('Ticker')
+        df = df.loc[tickers]
+        
+        return df
+    
+    
+    def __expand_to_calendar_dates(self, df, tickers, start, end):
+        """
+            The function works with pricing and market data fucntion.
+            It expands to the calendar date series from the original datafrme.
+        """
+        
+        cols = df.columns.tolist()
+        
+        num_ticker = len(tickers)
+        dates_array = pd.date_range(start=start, end=end).values
+        num_dates = len(dates_array)
+        
+        ticker_index = np.sort(np.resize(tickers, num_dates * num_ticker))
+        dates_index = np.resize(dates_array, num_dates * num_ticker)
+        
+        expand_df = pd.DataFrame(index=[ticker_index, dates_index])
+        df = pd.concat([expand_df, df.set_index(['Ticker', 'Date'])], axis=1).reset_index()
+        
+        df.columns = cols
         
         return df
     
@@ -242,6 +291,7 @@ class FinancialDataAPI:
             start -> Date = required
             end -> Date = required
             adj -> String [y/n] = y
+            fill_prev -> String [y/n]
         """
         
         data_set = field_dict['data_set']
@@ -252,16 +302,35 @@ class FinancialDataAPI:
         start = self.__get_param_value('start', **kwargs)
         end = self.__get_param_value('end', **kwargs)
         adj = self.__get_param_value('adj', 'y', **kwargs)
+        fill_prev = self.__get_param_value('fill_prev', 'n', **kwargs)
         
-        df = df[(df['Ticker'].isin(tickers)) & (df['Date'] >= start) & (df['Date'] <= end)].copy()
+        start_adj = start
+        
+        if fill_prev == 'y':
+            start_adj = (datetime.strptime(start, FinancialDataAPI.__date_format) - timedelta(days=10)).strftime(FinancialDataAPI.__date_format)
+        
+        df = df[(df['Ticker'].isin(tickers)) & (df['Date'] >= start_adj) & (df['Date'] <= end)].copy()
         
         if adj == 'y':
             df['Adj Factor'] = df['Adj. Close'] - df['Close']
             df[field_long_name] = df[field_long_name] + df['Adj Factor']
             
-        df = df[['Ticker', 'Date', field_long_name]].set_index('Ticker').copy()
+        df = df[['Ticker', 'Date', field_long_name]]
         
-        return df
+        df = self.__expand_to_calendar_dates(df, tickers, start_adj, end)
+        
+        if fill_prev == 'y':
+            df = df.fillna(method='ffill')
+            
+        df = df[df['Date'] >= start]
+        
+        # make sure the ticker order is the same as the request
+        df['Ticker Order'] = df['Ticker'].apply(lambda x: tickers.index(x))
+        df = df.sort_values(['Ticker Order', 'Date'])
+        del df['Ticker Order']
+        df = df.set_index('Ticker')
+        
+        return df.copy()
     
     
     def __get_market_data(self, tickers, field_dict, **kwargs):
@@ -273,6 +342,7 @@ class FinancialDataAPI:
             Param:
             start -> Date = required
             end -> Date = required
+            fill_prev -> String [y/n]
         """
         
         data_set = field_dict['data_set']
@@ -282,12 +352,31 @@ class FinancialDataAPI:
         
         start = self.__get_param_value('start', **kwargs)
         end = self.__get_param_value('end', **kwargs)
+        fill_prev = self.__get_param_value('fill_prev', 'n', **kwargs)
         
-        df = df[(df['Ticker'].isin(tickers)) & (df['Date'] >= start) & (df['Date'] <= end)].copy()
+        start_adj = start
+        
+        if fill_prev == 'y':
+            start_adj = (datetime.strptime(start, FinancialDataAPI.__date_format) - timedelta(days=10)).strftime(FinancialDataAPI.__date_format)
+        
+        df = df[(df['Ticker'].isin(tickers)) & (df['Date'] >= start_adj) & (df['Date'] <= end)].copy()
+        
+        df = df[['Ticker', 'Date', field_long_name]]
+        
+        df = self.__expand_to_calendar_dates(df, tickers, start_adj, end)
+        
+        if fill_prev == 'y':
+            df = df.fillna(method='ffill')
             
-        df = df[['Ticker', 'Date', field_long_name]].set_index('Ticker').copy()
+        df = df[df['Date'] >= start]
         
-        return df
+        # make sure the ticker order is the same as the request
+        df['Ticker Order'] = df['Ticker'].apply(lambda x: tickers.index(x))
+        df = df.sort_values(['Ticker Order', 'Date'])
+        del df['Ticker Order']
+        df = df.set_index('Ticker')
+        
+        return df.copy()
     
     
     def __fundamental_get_raw_data(self, data_set_name, tickers, field_long_name, as_of_date):
@@ -297,18 +386,21 @@ class FinancialDataAPI:
         
         df = FinancialDataAPI.__data_dict[data_set_name]
         
-        df = df[(df['Ticker'].isin(tickers)) & (df['Restated Date'] <= as_of_date)]
+        # free version of the bulk data from SimFin doesn't provide full restated history
+        # if use the paid version, then use 'Restated Date' otherwise use 'Publish Date'
+        df = df[(df['Ticker'].isin(tickers)) & (df['Publish Date'] <= as_of_date)].copy()
+        
+        df['As of Date'] = as_of_date
+        df['As of Date'] = df['As of Date'].astype('datetime64')
         
         cols = df.columns.tolist()
-        fixed_cols = cols[:cols.index('Restated Date') + 1]
-        raw_data_cols = fixed_cols + [field_long_name]
+        fixed_cols = cols[:cols.index('Restated Date') + 1] + ['As of Date']
+        raw_data_cols = [c for c in fixed_cols + [field_long_name] if c != 'SimFinId']
         
-        df = df[raw_data_cols].sort_values('Report Date')
-        df = df.groupby('Report Date').tail(1)
+        df = df[raw_data_cols].sort_values(['Ticker', 'Publish Date'])
+        df = df.groupby(['Ticker', 'Report Date']).tail(1).sort_values(['Ticker', 'Report Date'])
         
-        df = df[[c for c in df.columns.tolist() if c != 'SimFinId']].set_index('Ticker').copy()
-        
-        return df
+        return df.copy()
     
     
     def __fundamental_offset_period(self, data_set_name, tickers, field_long_name, offset_start, offset_end, as_of_date):
@@ -318,12 +410,72 @@ class FinancialDataAPI:
         
         df = self.__fundamental_get_raw_data(data_set_name, tickers, field_long_name, as_of_date)
         
-        i_last_period = len(df) - 1
+        if offset_start == offset_end:
+            offset_func = lambda d: d.sort_values(['Ticker', 'Report Date']).iloc[offset_end-1]
+        else:
+            if offset_end < 0:
+                offset_func = lambda d: d.sort_values(['Ticker', 'Report Date']).iloc[offset_start-1:offset_end+1]
+            else:
+                offset_func = lambda d: d.sort_values(['Ticker', 'Report Date']).iloc[offset_start-1:]
         
-        i_start = i_last_period + offset_start
-        i_end = i_last_period + offset_end + 1
+        df = df.groupby('Ticker').apply(offset_func)
         
-        return df.iloc[i_start:i_end].copy()
+        # make sure the ticker order is the same as the request
+        df['Ticker Order'] = df['Ticker'].apply(lambda x: tickers.index(x))
+        df = df.sort_values(['Ticker Order', 'As of Date', 'Report Date'])
+        del df['Ticker Order']
+        df = df.set_index('Ticker')
+        
+        return df.copy()
+    
+    
+    def __fundamental_offset_period_aod_range(self, data_set_name, tickers, field_long_name, offset_start, offset_end, as_of_date_start, as_of_date_end):
+        """
+            The function gets the offset period data for a given as of date range.
+        """
+        df = FinancialDataAPI.__data_dict[data_set_name]
+        
+        # free version of the bulk data from SimFin doesn't provide full restated history
+        # if use the paid version, then use 'Restated Date' otherwise use 'Report Date'
+        dt_range = df[
+            (df['Ticker'].isin(tickers)) & 
+            (df['Publish Date'] >= as_of_date_start) & 
+            (df['Publish Date'] <= as_of_date_end)
+        ]['Publish Date'].unique()
+        
+        dt_range = [pd.to_datetime(dt).strftime(FinancialDataAPI.__date_format) for dt in dt_range]
+        
+        # make sure we have enough data
+        if len(dt_range):
+        
+            if as_of_date_start != dt_range[0]:
+                dt_range = [as_of_date_start] + dt_range
+
+            full_dt_range = [pd.to_datetime(dt).strftime(FinancialDataAPI.__date_format) for dt in pd.date_range(start=as_of_date_start, end=as_of_date_end)]
+
+            df_list = []
+            last_df = None
+
+            for dt in full_dt_range:
+                if dt in dt_range:
+                    last_df = self.__fundamental_offset_period(data_set_name, tickers, field_long_name, offset_start, offset_end, dt)
+                    df_list.append(last_df.copy())
+                else:
+                    last_df['As of Date'] = dt
+                    df_list.append(last_df.copy())
+
+            df = pd.concat(df_list, sort=False).reset_index()
+            df['As of Date'] = pd.to_datetime(df['As of Date'], format=FinancialDataAPI.__date_format)
+
+            # make sure the ticker order is the same as the request
+            df['Ticker Order'] = df['Ticker'].apply(lambda x: tickers.index(x))
+            df = df.sort_values(['Ticker Order', 'As of Date', 'Publish Date'])
+            del df['Ticker Order']
+            df = df.set_index('Ticker')
+
+            return df.copy()
+        else:
+            raise Exception('Err: No enough data.')
         
     
     def __fundamental_absolute_period_q_ttm(self, data_set_name, tickers, field_long_name, y_start, q_start, y_end, q_end, as_of_date):
@@ -343,6 +495,13 @@ class FinancialDataAPI:
         cols = [c for c in df.columns.tolist() if c != 'Quarter']
         df = df[cols]
         
+        # make sure the ticker order is the same as the request
+        df = df.reset_index()
+        df['Ticker Order'] = df['Ticker'].apply(lambda x: tickers.index(x))
+        df = df.sort_values(['Ticker Order', 'As of Date', 'Publish Date'])
+        del df['Ticker Order']
+        df = df.set_index('Ticker')
+        
         return df.copy()
     
     
@@ -356,6 +515,13 @@ class FinancialDataAPI:
         df = df[
             (df['Fiscal Year'] >= y_start) & (df['Fiscal Year'] <= y_end)
         ]
+        
+        # make sure the ticker order is the same as the request
+        df = df.reset_index()
+        df['Ticker Order'] = df['Ticker'].apply(lambda x: tickers.index(x))
+        df = df.sort_values(['Ticker Order', 'As of Date', 'Publish Date'])
+        del df['Ticker Order']
+        df = df.set_index('Ticker')
         
         return df.copy()
     
@@ -378,7 +544,8 @@ class FinancialDataAPI:
             Quarter Start: q_start: Int [1/2/3/4] = latest quarter
             Quarter End: q_end: Int [1/2/3/4] = latest quarter
             
-            As of Date: as_of_date -> Date = date.today()
+            As of Date Start: as_of_date_start -> Date = date.today()
+            As of Date End: as_of_date_end -> Date = date.today()
         """
         
         data_set_list = field_dict['data_set'].split('/')
@@ -397,6 +564,7 @@ class FinancialDataAPI:
         
         offset_start = self.__get_param_value('offset_start', 0, **kwargs)
         offset_end = self.__get_param_value('offset_end', 0, **kwargs)
+        offset = offset_end
         
         if pt == 'q':
             data_set_name = data_set_dict['quarterly']
@@ -405,7 +573,18 @@ class FinancialDataAPI:
         elif pt == 'ttm':
             data_set_name = data_set_dict['ttm']
         
-        as_of_date = self.__get_param_value('as_of_date', date.today(), **kwargs)
+        as_of_date_start = self.__get_param_value('as_of_date_start', date.today(), **kwargs)
+        as_of_date_end = self.__get_param_value('as_of_date_end', date.today(), **kwargs)
+        as_of_date = as_of_date_end # default as of date is the as of date end
+        
+        # default is only one as of date and is_as_of_date_range is False
+        is_as_of_date_range = False
+        
+        if as_of_date_start > as_of_date_end:
+            raise Exception('Err: The start as of date is larger than the end date.')
+        elif as_of_date_start < as_of_date_end:
+            # request only in the case of only one offset period is given
+            is_as_of_date_range = True
         
         if pt == 'q' or pt == 'ttm':
             # if any of start end y and q is provided, require all or raise exception
@@ -413,10 +592,13 @@ class FinancialDataAPI:
             
             if y_start != y_q_none or y_end != y_q_none or q_start != y_q_none or q_end != y_q_none:
                 if y_start != y_q_none and y_end != y_q_none and q_start != y_q_none and q_end != y_q_none:
-                    # get data for the given period
-                    return self.__fundamental_absolute_period_q_ttm(
-                        data_set_name, tickers, field_long_name, y_start, q_start, y_end, q_end, as_of_date
-                    )
+                    if is_as_of_date_range:
+                        raise Exception('Err: As of date range can only be used with offset period.')
+                    else:
+                        # get data for the given period
+                        return self.__fundamental_absolute_period_q_ttm(
+                            data_set_name, tickers, field_long_name, y_start, q_start, y_end, q_end, as_of_date
+                        )
                 else:
                     raise Exception('Err: Missing start end year or quarter.')
         elif pt == 'a':
@@ -425,17 +607,26 @@ class FinancialDataAPI:
             
             if y_start != y_q_none or y_end != y_q_none:
                 if y_start != y_q_none and y_end != y_q_none:
-                    # get data for the given period
-                    return self.__fundamental_absolute_period_a(
-                        data_set_name, tickers, field_long_name, y_start, y_end, as_of_date
-                    )
+                    if is_as_of_date_range:
+                        raise Exception('Err: As of date range can only be used with offset period.')
+                    else:
+                        # get data for the given period
+                        return self.__fundamental_absolute_period_a(
+                            data_set_name, tickers, field_long_name, y_start, y_end, as_of_date
+                        )
                 else:
                     raise Exception('Err: Missing start end year.')
                     
         # get data for the given offset period
-        return self.__fundamental_offset_period(
-            data_set_name, tickers, field_long_name, offset_start, offset_end, as_of_date
-        ) 
+        if is_as_of_date_range:
+            # request as of date range for the given offset period
+            return self.__fundamental_offset_period_aod_range(
+                data_set_name, tickers, field_long_name, offset_start, offset_end, as_of_date_start, as_of_date_end
+            )
+        else:
+            return self.__fundamental_offset_period(
+                data_set_name, tickers, field_long_name, offset_start, offset_end, as_of_date
+            )
         
     
     def get_data(self, tickers, field, **kwargs):
@@ -445,6 +636,9 @@ class FinancialDataAPI:
             Only one field is allowed.
             If field is not found, the exception will be raised.
         """
+        
+        # make sure the ticker list is unique
+        tickers = [tk.upper().strip() for tk in list(dict.fromkeys(tickers))]
         
         field_dict = self.__get_field(field)
         
