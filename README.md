@@ -1,3 +1,6 @@
+# IMPORTANT NOTE #
+FinancialDataAPI is only built for learning purpose. It only supports free version of SimFIn bulk data. FinancialDataAPI should NOT be used for real investment decisions.
+
 # Financial-Data-API
 Example code to support Medium series for Factor Investing
 
