@@ -3,6 +3,7 @@ import numpy as np
 import os
 from datetime import date, datetime, timedelta
 
+
 class FinancialDataAPI:
     __data_dict = None
     __field_meta = None
@@ -115,10 +116,15 @@ class FinancialDataAPI:
             i.e. the tickers must have valid price on or before the as of date.
         """
         
+        num_days_check = 5 # number of days to validate if we consider the stock was active
+        
         px_df = FinancialDataAPI.__data_dict['shareprices-daily']
         
         # check if price exist
-        tickers_valid = px_df[px_df['Date'] <= as_of_date.strftime(FinancialDataAPI.__date_format)]['Ticker'].unique().tolist()
+        tickers_valid = px_df[
+            (px_df['Date'] <= as_of_date.strftime(FinancialDataAPI.__date_format))
+            & (px_df['Date'] >= (as_of_date - timedelta(days=num_days_check)).strftime(FinancialDataAPI.__date_format))
+        ]['Ticker'].unique().tolist()
         
         return tickers_valid
     
@@ -129,6 +135,8 @@ class FinancialDataAPI:
             level: Sector (level 1), Industry (level 2)
             as_of_date: datetime.date
         """
+        
+        num_days_check = 5 # number of days to validate if we consider the stock was active
         
         company_df = FinancialDataAPI.__data_dict['companies']
         industry_df = FinancialDataAPI.__data_dict['industries']
@@ -143,6 +151,7 @@ class FinancialDataAPI:
         tickers_valid = px_df[
             (px_df['Ticker'].isin(tickers)) 
             & (px_df['Date'] <= as_of_date.strftime(FinancialDataAPI.__date_format))
+            & (px_df['Date'] >= (as_of_date - timedelta(days=num_days_check)).strftime(FinancialDataAPI.__date_format))
         ]['Ticker'].unique().tolist()
         
         return tickers_valid
@@ -376,6 +385,7 @@ class FinancialDataAPI:
         del df['Ticker Order']
         df = df.set_index('Ticker')
         
+        
         return df.copy()
     
     
@@ -403,6 +413,20 @@ class FinancialDataAPI:
         return df.copy()
     
     
+    def __fundamental_fill_missing_tickers(self, df, tickers, as_of_date):
+        """
+            The function check if all tickers in the df index, if no means no data and will fill the ticker with NaN
+        """
+        
+        missing_tickers = [tk for tk in tickers if tk not in df.index.tolist()]
+        if len(missing_tickers):
+            for tk in missing_tickers:
+                df.loc[tk] = np.NaN
+                df.loc[tk, 'As of Date'] = pd.to_datetime(as_of_date, format=FinancialDataAPI.__date_format)
+            
+        return df
+    
+    
     def __fundamental_offset_period(self, data_set_name, tickers, field_long_name, offset_start, offset_end, as_of_date):
         """
             The function gets the fundamental data for the given offset periods
@@ -425,6 +449,8 @@ class FinancialDataAPI:
         df = df.sort_values(['Ticker Order', 'As of Date', 'Report Date'])
         del df['Ticker Order']
         df = df.set_index('Ticker')
+        
+        df = self.__fundamental_fill_missing_tickers(df, tickers, as_of_date)
         
         return df.copy()
     
@@ -472,9 +498,10 @@ class FinancialDataAPI:
             df = df.sort_values(['Ticker Order', 'As of Date', 'Publish Date'])
             del df['Ticker Order']
             df = df.set_index('Ticker')
-
+            
             return df.copy()
         else:
+            # todo return for all tickers NA
             raise Exception('Err: No enough data.')
         
     
@@ -501,6 +528,9 @@ class FinancialDataAPI:
         df = df.sort_values(['Ticker Order', 'As of Date', 'Publish Date'])
         del df['Ticker Order']
         df = df.set_index('Ticker')
+        del df['index']
+        
+        df = self.__fundamental_fill_missing_tickers(df, tickers, as_of_date)
         
         return df.copy()
     
@@ -522,6 +552,9 @@ class FinancialDataAPI:
         df = df.sort_values(['Ticker Order', 'As of Date', 'Publish Date'])
         del df['Ticker Order']
         df = df.set_index('Ticker')
+        del df['index']
+        
+        df = self.__fundamental_fill_missing_tickers(df, tickers, as_of_date)
         
         return df.copy()
     
