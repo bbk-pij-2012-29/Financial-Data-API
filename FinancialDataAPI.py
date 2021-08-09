@@ -418,13 +418,16 @@ class FinancialDataAPI:
             The function check if all tickers in the df index, if no means no data and will fill the ticker with NaN
         """
         
+        if 'Ticker' in df.columns.tolist():
+            df = df.set_index('Ticker')
+        
         missing_tickers = [tk for tk in tickers if tk not in df.index.tolist()]
         if len(missing_tickers):
             for tk in missing_tickers:
                 df.loc[tk] = np.NaN
                 df.loc[tk, 'As of Date'] = pd.to_datetime(as_of_date, format=FinancialDataAPI.__date_format)
             
-        return df
+        return df.reset_index()
     
     
     def __fundamental_offset_period(self, data_set_name, tickers, field_long_name, offset_start, offset_end, as_of_date):
@@ -444,13 +447,14 @@ class FinancialDataAPI:
         
         df = df.groupby('Ticker').apply(offset_func)
         
+        # add missing tickers
+        df = self.__fundamental_fill_missing_tickers(df, tickers, as_of_date)
+        
         # make sure the ticker order is the same as the request
         df['Ticker Order'] = df['Ticker'].apply(lambda x: tickers.index(x))
         df = df.sort_values(['Ticker Order', 'As of Date', 'Report Date'])
         del df['Ticker Order']
         df = df.set_index('Ticker')
-        
-        df = self.__fundamental_fill_missing_tickers(df, tickers, as_of_date)
         
         return df.copy()
     
@@ -522,6 +526,9 @@ class FinancialDataAPI:
         cols = [c for c in df.columns.tolist() if c != 'Quarter']
         df = df[cols]
         
+        # add missing tickers
+        df = self.__fundamental_fill_missing_tickers(df, tickers, as_of_date)
+        
         # make sure the ticker order is the same as the request
         df = df.reset_index()
         df['Ticker Order'] = df['Ticker'].apply(lambda x: tickers.index(x))
@@ -529,8 +536,6 @@ class FinancialDataAPI:
         del df['Ticker Order']
         df = df.set_index('Ticker')
         del df['index']
-        
-        df = self.__fundamental_fill_missing_tickers(df, tickers, as_of_date)
         
         return df.copy()
     
@@ -546,6 +551,9 @@ class FinancialDataAPI:
             (df['Fiscal Year'] >= y_start) & (df['Fiscal Year'] <= y_end)
         ]
         
+        # add missing tickers
+        df = self.__fundamental_fill_missing_tickers(df, tickers, as_of_date)
+        
         # make sure the ticker order is the same as the request
         df = df.reset_index()
         df['Ticker Order'] = df['Ticker'].apply(lambda x: tickers.index(x))
@@ -553,8 +561,6 @@ class FinancialDataAPI:
         del df['Ticker Order']
         df = df.set_index('Ticker')
         del df['index']
-        
-        df = self.__fundamental_fill_missing_tickers(df, tickers, as_of_date)
         
         return df.copy()
     
