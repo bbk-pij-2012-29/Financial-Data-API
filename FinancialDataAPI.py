@@ -315,8 +315,10 @@ class FinancialDataAPI:
         
         start_adj = start
         
+        days_look_back = 30
+        
         if fill_prev == 'y':
-            start_adj = (datetime.strptime(start, FinancialDataAPI.__date_format) - timedelta(days=10)).strftime(FinancialDataAPI.__date_format)
+            start_adj = (datetime.strptime(start, FinancialDataAPI.__date_format) - timedelta(days=days_look_back)).strftime(FinancialDataAPI.__date_format)
         
         df = df[(df['Ticker'].isin(tickers)) & (df['Date'] >= start_adj) & (df['Date'] <= end)].copy()
         
@@ -329,7 +331,7 @@ class FinancialDataAPI:
         df = self.__expand_to_calendar_dates(df, tickers, start_adj, end)
         
         if fill_prev == 'y':
-            df = df.fillna(method='ffill')
+            df[field_long_name] = df.groupby('Ticker').fillna(method='ffill')[field_long_name]
             
         df = df[df['Date'] >= start]
         
@@ -365,8 +367,10 @@ class FinancialDataAPI:
         
         start_adj = start
         
+        days_look_back = 30
+        
         if fill_prev == 'y':
-            start_adj = (datetime.strptime(start, FinancialDataAPI.__date_format) - timedelta(days=10)).strftime(FinancialDataAPI.__date_format)
+            start_adj = (datetime.strptime(start, FinancialDataAPI.__date_format) - timedelta(days=days_look_back)).strftime(FinancialDataAPI.__date_format)
         
         df = df[(df['Ticker'].isin(tickers)) & (df['Date'] >= start_adj) & (df['Date'] <= end)].copy()
         
@@ -375,7 +379,7 @@ class FinancialDataAPI:
         df = self.__expand_to_calendar_dates(df, tickers, start_adj, end)
         
         if fill_prev == 'y':
-            df = df.fillna(method='ffill')
+            df[field_long_name] = df.groupby('Ticker').fillna(method='ffill')[field_long_name]
             
         df = df[df['Date'] >= start]
         
